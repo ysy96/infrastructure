@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: A template that creates a cicd user and grants it access on all the resources it needs access to such as the S3 bucket for CodeDeploy, etc.
+Parameters:
+  CodeDeployBucketName: 
+    Type: String
+    Description: The name of the bucket.
+    Default: codedeploy.prod.songyue.me
+
+  Region: 
+    Type: String
+    Description: The aws region
+    Default: us-east-1
+
+  AWSAccount:
+    Type: String
+    Description: The aws account
+    Default: 284018978494
+
+  CodeployApplicationName:
+    Type: String
+    Description: The codedeploy application name
+    Default: csye6225-webapp
+
+
+
+Resources:
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "CodeDeployServiceRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - codedeploy.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Description: Role to provide access to S3 and codedeploy
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+        - arn:aws:iam::aws:policy/CloudWatchAgentAdminPolicy
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  CodeDeployEC2ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "CodeDeployEC2ServiceRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - codedeploy.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Description: Role to host your web application
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentAdminPolicy
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+        - arn:aws:iam::aws:policy/AdministratorAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonSESFullAccess
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambda
+
+
+  ghactions:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ghactions"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - codedeploy.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Description: Role to provide access to S3 and codedeploy
+      
+  # IAM Policy
+  CodeDeployEC2S3Policy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: CodeDeploy-EC2-S3
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ['s3:Get*','s3:List*']
+            Resource: 
+            - !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref CodeDeployBucketName
+            - !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref CodeDeployBucketName
+                - /*
+      Roles:
+        - !Ref CodeDeployEC2ServiceRole
+
+  # IAM Policy
+  GHUploadToS3Policy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: GH-Upload-To-S3
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ['s3:PutObject','s3:Get*','s3:List*']
+            Resource: 
+            - !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref CodeDeployBucketName
+      Roles:
+        - !Ref ghactions
+
+  GHCodeDeploy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: GH-Code-Deploy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: 
+              - 'codedeploy:RegisterApplicationRevision'
+              - 'codedeploy:GetApplicationRevision'
+            Resource: 
+              - !Join
+                - ''
+                - - 'arn:aws:codedeploy:'
+                  - !Ref Region
+                  - ':'
+                  - !Ref AWSAccount
+                  - ':'
+                  - 'application:'
+                  - !Ref CodeployApplicationName
+          - Effect: Allow
+            Action: 
+              - 'codedeploy:CreateDeployment'
+              - 'codedeploy:GetDeployment'
+            Resource:
+              - "*"
+          - Effect: Allow
+            Action: 
+              - 'codedeploy:GetDeploymentConfig'
+            Resource: 
+              - !Join
+                - ''
+                - - 'arn:aws:codedeploy:'
+                  - !Ref Region
+                  - ':'
+                  - !Ref AWSAccount
+                  - ':'
+                  - 'deploymentconfig:'
+                  - 'CodeDeployDefault.OneAtATime'
+              - !Join
+                - ''
+                - - 'arn:aws:codedeploy:'
+                  - !Ref Region
+                  - ':'
+                  - !Ref AWSAccount
+                  - ':'
+                  - 'deploymentconfig:'
+                  - 'CodeDeployDefault.HalfAtATime'
+              - !Join
+                - ''
+                - - 'arn:aws:codedeploy:'
+                  - !Ref Region
+                  - ':'
+                  - !Ref AWSAccount
+                  - ':'
+                  - 'deploymentconfig:'
+                  - 'CodeDeployDefault.AllAtOnce'
+      Roles:
+        - !Ref ghactions
+
+  GHEC2AMI:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: gh-ec2-ami
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ec2:AttachVolume'
+              - 'ec2:AuthorizeSecurityGroupIngress'
+              - 'ec2:CopyImage'
+              - 'ec2:CreateImage'
+              - 'ec2:CreateKeypair'
+              - 'ec2:CreateSecurityGroup'
+              - 'ec2:CreateSnapsho'
+              - 'ec2:CreateTags'
+              - 'ec2:CreateVolume'
+              - 'ec2:DeleteKeyPair'
+              - 'ec2:DeleteSecurityGroup'
+              - 'ec2:DeleteSnapshot'
+              - 'ec2:DeleteVolume'
+              - 'ec2:DeregisterImage'
+              - 'ec2:DescribeImageAttribute'
+              - 'ec2:DescribeImages'
+              - 'ec2:DescribeInstances'
+              - 'ec2:DescribeInstanceStatus'
+              - 'ec2:DescribeRegions'
+              - 'ec2:DescribeSecurityGroups'
+              - 'ec2:DescribeSnapshots'
+              - 'ec2:DescribeSubnets'
+              - 'ec2:DescribeTags'
+              - 'ec2:DescribeVolumes'
+              - 'ec2:DetachVolume'
+              - 'ec2:GetPasswordData'
+              - 'ec2:ModifyImageAttribute'
+              - 'ec2:ModifyInstanceAttribute'
+              - 'ec2:ModifySnapshotAttribute'
+              - 'ec2:RegisterImage'
+              - 'ec2:RunInstances'
+              - 'ec2:StopInstances'
+              - 'ec2:TerminateInstances'
+            Resource: "*"
+      Roles:
+        - !Ref ghactions
+
+
+  # Codedeploy Application
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties: 
+      ApplicationName: csye6225-webapp
+      ComputePlatform: Server
+
+
+  # Lambda Role
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "LambdaRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+            - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - codedeploy.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonSESFullAccess
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambda
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+      Path: /
+      Description: Lambda execution role
+
+
+  # Codedeploy Application
+  LambdaCodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties: 
+      ApplicationName: serverless
+      ComputePlatform: Lambda
